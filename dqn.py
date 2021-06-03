@@ -41,11 +41,7 @@ class Agent(Player):
   def move(self, board, legal_moves, hash):
     values = self.model(np.array([board]), training=False).numpy()[0]
 
-    print(legal_moves)
-
     res = self.max(values, legal_moves)
-    
-    print(res)
 
     action = random.choice(res[0]) if random.random() > self.epsilon \
       else legal_moves[random.randint(0,len(legal_moves) - 1)]
