@@ -95,28 +95,7 @@ class QPlayer(Player):
 
     def update_epsilon(self, N, t):
         self.epsilon = epsilon_decay(N,t)
-
-# def play_human(memory):
-#     game = Connect4Game()	
-#     view = Connect4Viewer(game=game)
-#     view.initialize()
-
-#     sync = Synchronizer(game, QPlayer(memory, epsilon=0), HumanPlayer())
-    
-#     while True:
-#         winner, board_state, moves = sync.play(True)
-#         if board_state != 0:
-#             memory.update(1, moves[winner[0]])
-#             memory.update(0, moves[winner[0] - 1])
-#         while True:
-#             event = pygame.event.wait()
-#             if event.type == pygame.QUIT:
-#                 pygame.quit()
-#                 return
-#             if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-#                 game.reset_game()
-#                 break
-
+        
 def train_self_play(memory: Memory, episodes=10000):
     game = Connect4Game().copy_state()
     p1 = QPlayer(game, memory)
