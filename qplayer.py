@@ -22,19 +22,16 @@ class Memory:
             q_sa = self.Q(s,a)
             if max < q_sa:
                 max = q_sa
+        
         return max
     
-    def update_q_sa(self, s, a, max_q, r = 0):
+    def init_sa(self, s, a):
         if s not in self.values:
             self.values[s] = {a: 0}
         elif a not in self.values[s]:
             self.values[s].update({a: 0})
-
-        if not r:
-            self.values[s][a] = r
-        else:
-            self.values[s][a] = self.values[s][a] + self.lr * (r + self.gamma * max_q - self.values[s][a])
-
+    
+    def rm_useless_sa(self, s, a):
         if self.values[s][a] == 0:
             del self.values[s][a]
             if self.values[s] == {}:
@@ -46,16 +43,20 @@ class Memory:
             r = -r
 
         moves = moves[::-1]
-
-        self.update_q_sa(moves[0][2], moves[0][3], 0, r)
+        self.init_sa(moves[0][2], moves[0][3])
+        self.values[moves[0][2]][moves[0][3]] = r
 
         for i in range(1, len(moves)):
-            self.update_q_sa(moves[i][2], moves[i][3], self.max(moves[i - 1][2], moves[i - 1][1]))
+            s = moves[i][2]
+            a = moves[i][3]
+            self.init_sa(s, a)
+            self.values[s][a] = self.values[s][a] + self.lr * (r + self.gamma * self.max(moves[i - 1][2], moves[i - 1][1]) - self.values[s][a])
+            self.rm_useless_sa(s,a)
 
     def load(self, name="data/data_u.json"):
         def jsonKeys2int(x):
             if isinstance(x, dict):
-                    return {int(k):v for k,v in x.items()}
+                return {int(k):v for k,v in x.items()}
             return x
         try:
             with open(name, 'r') as file:
@@ -95,10 +96,38 @@ class QPlayer(Player):
 
     def update_epsilon(self, N, t):
         self.epsilon = epsilon_decay(N,t)
-        
+
+def play_against_random(memory, episodes=10000, train=True):
+    game = Connect4Game().copy_state()
+    epsilon = 0 if not train else 1
+    p = QPlayer(memory, epsilon=epsilon)
+    sync = Synchronizer(game, p, QPlayer(Memory(name="data/empty.json")))
+
+    win_rate = 0
+    t = 0
+    while t < episodes:
+        winner, board_state, moves = sync.play()
+        if board_state != 0:
+            if winner[1] == p:
+                win_rate += 1
+            if train:
+                memory.update(1, moves[winner[0]])
+                memory.update(0, moves[winner[0] - 1])
+        game.reset_game()
+        t += 1
+        if train:
+            p.update_epsilon(episodes, t)
+        if t % 10000 == 0:
+            print("{}: winning {:.2f}% of games".format(t,win_rate/t * 100))
+        if t % 1000000 == 0:
+            memory.save("data/data_r.json")
+
+    print("WON: {:.2f}% of games".format(win_rate/episodes * 100))
+    pass
+
 def train_self_play(memory: Memory, episodes=10000):
     game = Connect4Game().copy_state()
-    p1 = QPlayer(game, memory)
+    p1 = QPlayer(memory)
     sync = Synchronizer(game, p1, p1)
     
     t = 0
@@ -114,35 +143,55 @@ def train_self_play(memory: Memory, episodes=10000):
         if t % 10000 == 0:
             print(t)
         if t % 1000000 == 0:
-            memory.save()
+            memory.save("data/data_s.json")
 
 def train_against_fixed(memory: Memory, episodes=10000):
     game = Connect4Game().copy_state()
-    p1 = QPlayer(game, memory, epsilon=0.2)
+    p1 = QPlayer(memory, epsilon=0.2)
 
     t = 0
     while t < episodes:
-        p2 = QPlayer(game, pickle.loads(pickle.dumps(memory)), epsilon=0.2)
+        p2 = QPlayer(pickle.loads(pickle.dumps(memory)), epsilon=0.2)
         sync = Synchronizer(game, p1, p2)
         for i in range(t, t + 101):
             winner, board_state, moves = sync.play()
             if board_state != 0:
                 if winner[1] == p1:
-                    memory.update(1, moves[winner])
+                    memory.update(1, moves[winner[0]])
                 else:
-                    memory.update(0, moves[winner - 1])
+                    memory.update(0, moves[winner[0] - 1])
             game.reset_game()
         t = i
         if t % 10000 == 0:
             print(t)
         if t % 1000000 == 0:
-            memory.save()
+            memory.save("data/data_f.json")
 
 if __name__ == '__main__':
     from humanplayer import play_human
-    memory = Memory(gamma=0.95, lr=0.1)
-    #train_against_fixed(memory, episodes=1000000)
+    GAMMA = 0.95
+    LR = 0.1
+    EPISODES = 1000000
     
-    #memory.save()
+    
+    print("TRAINING AGAINST RANDOM")
+    memory = Memory(gamma=GAMMA, lr=LR, name="data/data_r.json")
+    play_against_random(memory, episodes=EPISODES)
+    memory.save("data/data_r.json")
+    print(len(memory.values))
+
+    # print("TRAINING AGAINST SELF")
+    # self_memory = Memory(gamma=GAMMA, lr=LR, name="data/data_s.json")
+    # train_self_play(self_memory, episodes=EPISODES)
+    # self_memory.save(name="data/data_s.json")
+    # print(len(self_memory.values))
+    # play_against_random(self_memory, episodes=100, train=False)
+
+    # print("TRAINING AGAINST FIXED")
+    # f_memory = Memory(gamma=GAMMA, lr=LR, name="data/data_s.json")
+    # train_self_play(f_memory, episodes=EPISODES)
+    # f_memory.save(name="data/data_f.json")
+    # print(len(f_memory.values))
+    # play_against_random(f_memory, episodes=100, train=False)
 
     play_human(QPlayer(memory, epsilon=0))
