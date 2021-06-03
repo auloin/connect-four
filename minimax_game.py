@@ -3,6 +3,7 @@ import pygame.gfxdraw
 import random
 import enum
 from copy import deepcopy
+import json
 
 # Graphical size settings
 SQUARE_SIZE = 100
@@ -64,7 +65,7 @@ class Connect4Game(Observable):
 		Resets the game state (board and variables)
 		"""
 		self._board = [[0 for _ in range(self._rows)] for _ in range(self._cols)]
-		self._turn = random.randint(1, 2)
+		self._turn = 1#random.randint(1, 2)
 		self._won = None
 		self.notify(Event.GAME_RESET)
 
@@ -218,7 +219,7 @@ class Connect4Game(Observable):
 		return new_one
 	
 	def hash(self):
-		return ((tuple(r) for r in self._board)).__hash__()
+		return hash(tuple([tuple(r) for r in self._board]))
 
 
 class Connect4Viewer(Observer):
@@ -304,7 +305,7 @@ class Connect4Viewer(Observer):
 class Player:
 	def __init__(self):
 		pass
-	def move(self):
+	def move(self, debug=False):
 		pass
 
 class Memory:
@@ -312,84 +313,199 @@ class Memory:
 		self.gamma = gamma
 		self.lr = lr
 		self.values = {} # Q[s][a]
+		self.load()
 	
 	def Q(self,s,a):
 		if s in self.values and a in self.values[s]:
 			return self.values[s][a]
 		return 0
+
+	def max(self, s, g):
+		max = float("-inf")
+		for a in range(7):
+			if g.copy_state().place(a) == None:
+				continue
+			q_sa = self.Q(s,a)
+			if max < q_sa:
+				max = q_sa
+		return max
 	
+	def update_q_sa(self, s, a, max_q, r = 0):
+		if s not in self.values:
+			self.values[s] = {a: 0}
+		elif a not in self.values[s]:
+			self.values[s].update({a: 0})
+		
+		self.values[s][a] = self.values[s][a] + self.lr * (r + self.gamma * max_q - self.values[s][a])
+
+		if self.values[s][a] == 0:
+			del self.values[s][a]
+			if self.values[s] == {}:
+				del self.values[s]
+
+	def update(self, type, moves):
+		moves = moves[::-1]
+
+		if self.Q(moves[0][0], moves[0][1]) != 0:
+			return
+
+		self.update_q_sa(moves[0][0], moves[0][1], 0, 1)
+		self.update_q_sa(moves[1][0], moves[1][1], -self.max(moves[0][0], moves[0][2]), -1)
+
+		#print(self.Q(moves[1][0], moves[1][1]))
+
+		for i in range(2, len(moves)):
+			self.update_q_sa(moves[i][0], moves[i][1], -self.max(moves[i - 1][0],moves[i - 1][2]))
+
+	def load(self):
+		try:
+			with open('data.json', 'r') as file:
+				self.values = json.load(file)
+		except IOError:
+			pass
+	
+	def save(self):
+		try:
+			with open('data.json', 'w') as file:
+				json.dump(self.values, file)
+		except IOError:
+			pass
+
+class HumanPlayer(Player):
+	def __init__(self, game: Connect4Game):
+		self.game = game
+
+	def move(self, debug=False):
+		while True:
+			for event in pygame.event.get():
+				if event.type == pygame.QUIT:
+					pygame.quit()
+					return None
+				if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+					if self.game.get_win() is None:
+						action = pygame.mouse.get_pos()[0] // SQUARE_SIZE
+						res = self.game.place(action)
+						if res != None:
+							return action
+
+class TrainingCenter:
+	def __init__(self, memory: Memory, episodes=10000):
+		self.memory = memory
+		self.episodes = episodes
+
+	def train(self):
+		game = Connect4Game().copy_state()
+		p1 = QPlayer(game, self.memory)
+		p2 = QPlayer(game, self.memory)
+		sync = Synchronizer(game, p1, p2)
+		
+		eps = self.episodes
+
+		while self.episodes > 0:
+			winner, board_state, moves = sync.play()
+			if board_state != 0:
+				self.memory.update(winner, moves)
+			game.reset_game()
+			self.episodes -= 1
+			p1.set_epislon(self.episodes / eps)
+			p2.set_epislon(self.episodes / eps)
+			if self.episodes % 10000 == 0:
+				print(self.episodes)
+
 class QPlayer(Player):
 	def __init__(self, game: Connect4Game, memory: Memory, epsilon=1):
-		
 		self.game = game
 		self.epsilon = epsilon
 		self.memory = memory
 
-	def choice(self, games, best):
-		legal_games =  [i for i in range(7) if games[i] is not None] 
-		return best[random.choice(best)] if random.random() > self.epsilon \
-			else legal_games[random.randint(0,len(legal_games) - 1)]
+	def choice(self, legal_moves, best):
+		return random.choice(best) if random.random() > self.epsilon \
+			else legal_moves[random.randint(0,len(legal_moves) - 1)]
 
-	def move(self):
-		games = [self.game.copy_state()]
-		games[0].place(0)
-		best_moves = [0]
-		
-		for i in range(1,7):
+	def move(self, debug=False):
+		legal_moves = []
+		best_moves = None
+
+		for i in range(0,self.game.get_cols()):
 			game = self.game.copy_state()
 			res = game.place(i)
+			if game.get_win() != None:
+				self.game.place(i)
+				return i
 			if res:
-				games.append(game)
-				if self.memory.Q(games[best_moves[0]].hash(),best_moves[0]) == self.memory.Q(game.hash(), i):
-					best_moves.append(i)
-				elif self.memory.Q(games[best_moves[0]].hash(),best_moves[0]) < self.memory.Q(game.hash(), i):
+				legal_moves.append(i)
+				if not best_moves:
 					best_moves = [i]
-			else:
-				games.append(None)
+				elif self.memory.Q(self.game.hash(),best_moves[0]) == self.memory.Q(self.game.hash(), i):
+					best_moves.append(i)
+				elif self.memory.Q(self.game.hash(),best_moves[0]) < self.memory.Q(self.game.hash(), i):
+					best_moves = [i]
 				
-		action = self.choice(games, best_moves)
+		action = self.choice(legal_moves, best_moves)
+		if debug:
+			print(self.game.hash(),self.memory.Q(self.game.hash(), action))
 		self.game.place(action)
 		return action
+
+	def set_epislon(self, epsilon):
+		self.epsilon = epsilon
 
 class Synchronizer:
 	def __init__(self, game: Connect4Game,  player1: Player, player2: Player):
 		self.players = [player1, player2]
-		random.shuffle(self.players)
 		self.game = game
-		self.moves = [[] for _ in range(2)]
 
-	def play(self):
+	def play(self, debug = False):
+		moves = []
+		random.shuffle(self.players)
 		turn = 0
-		while self.game.get_win() == None:
-			action = self.players[turn].move()
-			self.moves[turn].append((self.game.hash(), action))
-			turn = 1 if turn == 0 else 0
-		
+		while True:
+			hash = self.game.hash()
+			game = self.game.copy_state()
+			action = self.players[turn].move(debug)
+			if action == None:
+				break
+			moves.append((hash, action, game))
+			if self.game.get_win() != None:
+				break
+			turn = not turn
+
+		return turn, self.game.get_win(), moves
+
+def play_human(memory):
+	game = Connect4Game()	
+	view = Connect4Viewer(game=game)
+	view.initialize()
+
+	sync = Synchronizer(game, QPlayer(game, memory, epsilon=0), HumanPlayer(game))
+	
+	while True:
+		winner, board_state, moves = sync.play(True)
+		if board_state != 0:
+			memory.update(winner, moves)
+		while True:
+			event = pygame.event.wait()
+			if event.type == pygame.QUIT:
+				pygame.quit()
+				return
+			if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+				game.reset_game()
+				break
+
 if __name__ == '__main__':
-	game = Connect4Game()
-	game.reset_game()
-
-	game = game.copy_state()
-
-	memory = Memory()
-
-	# view = Connect4Viewer(game=game)
-	# view.initialize()
-
-	# running = True
-	# while running:
-	# 	for event in pygame.event.get():
-	# 		if event.type == pygame.QUIT:
-	# 			running = False
-	# 		if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-	# 			if game.get_win() is None:
-	# 				game.place(pygame.mouse.get_pos()[0] // SQUARE_SIZE)
-	# 			else:
-	# 				game.reset_game()
+	# import time
+	memory = Memory(gamma=1, lr=0.1)
+	
+	TrainingCenter(memory, 1000000).train()
+	# print(memory.values)
+	try:
+		play_human(memory)
+	except:
+		pass
+	#finally:
+	#	memory.save()
+	#time.sleep(5)
 
 	# pygame.quit()
-	sync = Synchronizer(game, QPlayer(game, memory), QPlayer(game, memory))
-	print("playing...")
-	sync.play()
-	print("finished")
-	print(sync.moves)
+
+
