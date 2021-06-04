@@ -11,3 +11,7 @@ These actions can also be performed programmatically using the corresponding fun
 ## Screenshot
 
 ![Connect Four screenshot](screenshot.png)
+
+## AI
+
+Entries for the AIs are `qplayer.py` and `dqn.py` they already contain all the necessary code for training and playing. You'll only need to uncomment the parts you're interested in.
