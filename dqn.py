@@ -67,11 +67,11 @@ class Agent(Player):
       i = 0
       for state, action, reward, next_state, done in minibatch:
         statebatch[i] = state[0]
-        target = self.model(state[0], training=False).numpy()
+        target = self.model(state[0]).numpy()
         if done:
           target[0][action] = reward
         else:
-          t = self.target_model(next_state[0], training=False).numpy()[0]
+          t = self.target_model(next_state[0]).numpy()[0]
           res = self.max(t, next_state[1])
           target[0][action] = reward + self.gamma * res[1]
         targetbatch[i] = target
@@ -132,10 +132,73 @@ def feed_moves(moves, r, agent):
         agent.memorize(curr, moves[i][3], 0, prev, False)
         prev = curr
 
-if __name__ == '__main__':
-#   train_self_play()
-    from humanplayer import play_human
+def train_against_q(qplayer, episodes=10000):
+    game = Connect4Game().copy_state()
+    p = Agent()
+    sync = Synchronizer(game, p, qplayer)
+
+    batch_size = 32
+    update_target_ctr = 0
+
+    for t in range(episodes):
+        winner, board_state, moves = sync.play()
+        
+        r = 0
+        if board_state != 0:
+            r = 1
+        feed_moves(moves[winner[0]], r, p)
+        feed_moves(moves[winner[0] - 1], -r, p)
+
+        p.update_epsilon(episodes, t)
+
+        game.reset_game()
+
+        if len(p.memory) > batch_size:
+            p.replay(batch_size)
+            update_target_ctr += 1
+        if update_target_ctr == 10:
+            p.update_target_model()
+            update_target_ctr = 0
+
+        if t % 10000 == 0:
+            print(t)
+
+    p.save("data/dqn_weights")
+
+def play_against_random(episodes=100):
+    game = Connect4Game().copy_state()
     a = Agent(e_init=0)
     a.load("data/dqn_weights")
+    sync = Synchronizer(game, a, QPlayer(Memory(name="data/empty.json")))
 
-    play_human(a)
+    print("hello")
+    win_rate = 0
+    t = 0
+    while t < episodes:
+        winner, board_state, moves = sync.play()
+        if board_state != 0:
+            if winner[1] == a:
+                win_rate += 1
+        game.reset_game()
+        t += 1
+
+    print(win_rate)
+
+if __name__ == '__main__':
+    from qplayer import QPlayer, Memory
+    
+    # Uncomment to train the AI against itself
+    # train_self_play(episodes=40000)
+    
+    # Uncomment to train the AI against a tabular Q-learning player
+    # train_against_q(QPlayer(Memory(name="data/data_s.json"), epsilon=0.05), episodes=40000)
+
+    
+    # Uncomment to play against a the AI after training
+    # from humanplayer import play_human
+    # a = Agent(e_init=0)
+    # a.load("data/dqn_weights")
+    # play_human(a)
+
+    # Assess the quality against a random player
+    play_against_random()
