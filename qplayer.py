@@ -158,7 +158,6 @@ def train_against_fixed(memory: Memory, episodes=10000):
             if board_state != 0:
                 if winner[1] == p1:
                     memory.update(1, moves[winner[0]])
-                else:
                     memory.update(0, moves[winner[0] - 1])
             game.reset_game()
         t = i
@@ -167,6 +166,31 @@ def train_against_fixed(memory: Memory, episodes=10000):
         if t % 1000000 == 0:
             memory.save("data/data_f.json")
 
+def arena(players):
+    game = Connect4Game().copy_state()
+    scores = [[] for _ in range(len(players))]
+    draws = [0] * len(players)
+    for i in range(len(players) - 1):
+        p1 = players[i]
+        for j in range(i+1, len(players)):
+            p2 = players[j]
+            sync = Synchronizer(game, p1, p2)
+            wins = [0, 0]
+            for _ in range(100):
+                winner, board_state, moves = sync.play()
+                if board_state != 0:
+                    if winner[1] == p1:
+                        wins[0] += 1
+                    if winner[1] == p2:
+                        wins[1] += 1
+                else:
+                   draws[i] += 1
+                   draws[j] += 1 
+                game.reset_game()
+            scores[i].append(wins[0])
+            scores[j].append(wins[1])
+    return scores, draws
+
 if __name__ == '__main__':
     from humanplayer import play_human
     GAMMA = 0.95
@@ -174,24 +198,36 @@ if __name__ == '__main__':
     EPISODES = 1000000
     
     
-    print("TRAINING AGAINST RANDOM")
-    memory = Memory(gamma=GAMMA, lr=LR, name="data/data_r.json")
-    play_against_random(memory, episodes=EPISODES)
-    memory.save("data/data_r.json")
-    print(len(memory.values))
+    # print("TRAINING AGAINST RANDOM")
+    # memory = Memory(gamma=GAMMA, lr=LR, name="data/data_r.json")
+    # play_against_random(memory, episodes=EPISODES)
+    # memory.save("data/data_r.json")
+    # print(len(memory.values))
+    # play_against_random(memory, episodes=100, train=False)
 
-    # print("TRAINING AGAINST SELF")
+    #print("TRAINING AGAINST SELF")
     # self_memory = Memory(gamma=GAMMA, lr=LR, name="data/data_s.json")
     # train_self_play(self_memory, episodes=EPISODES)
     # self_memory.save(name="data/data_s.json")
     # print(len(self_memory.values))
-    # play_against_random(self_memory, episodes=100, train=False)
+    #play_against_random(self_memory, episodes=100, train=False)
+
+    print("TRAINING AGAINST FIXED")
+    f_memory = Memory(gamma=GAMMA, lr=LR, name="data/data_f.json")
+    train_against_fixed(f_memory, episodes=EPISODES)
+    f_memory.save(name="data/data_f.json")
+    print(len(f_memory.values))
+    play_against_random(f_memory, episodes=100, train=False)
+
+    play_human(QPlayer(f_memory, epsilon=0))
 
     # print("TRAINING AGAINST FIXED")
-    # f_memory = Memory(gamma=GAMMA, lr=LR, name="data/data_s.json")
-    # train_self_play(f_memory, episodes=EPISODES)
-    # f_memory.save(name="data/data_f.json")
-    # print(len(f_memory.values))
-    # play_against_random(f_memory, episodes=100, train=False)
+    # fs_memory = Memory(gamma=GAMMA, lr=LR, name="data/data_s.json")
+    # train_against_fixed(fs_memory, episodes=EPISODES)
+    # fs_memory.save(name="data/data_fs.json")
+    # print(len(fs_memory.values))
+    # play_against_random(fs_memory, episodes=100, train=False)
 
-    play_human(QPlayer(memory, epsilon=0))
+    # play_human(QPlayer(f_memory, epsilon=0))
+
+    # print(arena([QPlayer(memory, epsilon=0), QPlayer(self_memory, epsilon=0), QPlayer(f_memory, epsilon=0)]))

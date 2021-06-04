@@ -11,7 +11,7 @@ from utils import Player, Synchronizer, epsilon_decay
 
 class Agent(Player):
 
-  def __init__(self, gamma = 0.95, lr=0.1, input_shape=(7,6), action_size = 7, e_init = 1, e_min = 0.1):
+  def __init__(self, gamma = 0.95, lr=0.001, input_shape=(7,6), action_size = 7, e_init = 1, e_min = 0.1):
     self.lr = lr
     self.input_shape = input_shape
     self.action_size = action_size
@@ -71,7 +71,7 @@ class Agent(Player):
         if done:
           target[0][action] = reward
         else:
-          t = self.model(next_state[0], training=False).numpy()[0]
+          t = self.target_model(next_state[0], training=False).numpy()[0]
           res = self.max(t, next_state[1])
           target[0][action] = reward + self.gamma * res[1]
         targetbatch[i] = target
@@ -114,11 +114,11 @@ def train_self_play(episodes=5000):
         if len(p.memory) > batch_size:
             p.replay(batch_size)
             update_target_ctr += 1
-        if update_target_ctr == 100:
+        if update_target_ctr == 10:
             p.update_target_model()
             update_target_ctr = 0
 
-        if t % 100 == 0:
+        if t % 10000 == 0:
             print(t)
 
     p.save("data/dqn_weights")
